@@ -6,4 +6,5 @@ In this repo, you can find the DANN application for gearbox fault detection clas
 flipGradientTF.py/flipGradientKeras.py from @bearnshaw is slightly modifed for the gradient reversal layer to work.
 
 Presentation link: https://www.youtube.com/watch?v=2mGndVJMYss
+
 Paper is accesible from: https://papers.phmsociety.org/index.php/phmconf/article/view/1184
