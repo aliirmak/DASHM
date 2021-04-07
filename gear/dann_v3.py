@@ -22,6 +22,7 @@ Author: Vanush Vaswani (vanush@gmail.com)
 '''
 
 from keras.layers import Input, Dense, Dropout, Lambda
+from keras.layers import Conv1D, MaxPooling1D, Flatten
 from keras.optimizers import SGD
 from keras.models import Model
 from keras.utils import plot_model
@@ -85,13 +86,17 @@ def evaluate_dann(X_test, y_test, batch_size):
 
 # Model parameters
 batch_size = 128
-nb_epoch_src, nb_epoch_trg = 75, 200
+nb_epoch_src, nb_epoch_trg = 75, 100
 nb_classes = 6
-nb_features = 601
+nb_features = 301
+nb_channel = 2
+nb_filters = 32
+nb_conv = 5
+nb_pool = 2
 
 #%% prepare input/output
 # download data
-data = pickle.load(open('data_gear_v2', "rb"))
+data = pickle.load(open('data_gear_v3', "rb"))
 
 x_data_s_pre = data[0]
 x_data_t_pre = data[1]
@@ -100,26 +105,29 @@ data_flag = False
 j = 0
 for sublist_s, sublist_t in zip(x_data_s_pre, x_data_t_pre):  
     if not data_flag:
-        x_data_s = np.copy(sublist_s.T)
-        y_data_s = np.copy(j * np.ones(sublist_s.T.shape[0]))
+        x_data_s = np.copy(sublist_s.transpose(2, 0, 1))
+        y_data_s = np.copy(j * np.ones(sublist_s.transpose(2, 0, 1).shape[0]))
         
-        x_data_t = np.copy(sublist_t.T)
-        y_data_t = np.copy(j * np.ones(sublist_t.T.shape[0]))
+        x_data_t = np.copy(sublist_t.transpose(2, 0, 1))
+        y_data_t = np.copy(j * np.ones(sublist_t.transpose(2, 0, 1).shape[0]))
         data_flag = True
     else:
-        x_data_s = np.vstack((x_data_s, sublist_s.T))
-        y_data_s = np.hstack((y_data_s, j * np.ones(sublist_s.T.shape[0])))
+        x_data_s = np.vstack((x_data_s, sublist_s.transpose(2, 0, 1)))
+        y_data_s = np.hstack((y_data_s, j * np.ones(sublist_s.transpose(2, 0, 1).shape[0])))
         
-        x_data_t = np.vstack((x_data_t, sublist_t.T))
-        y_data_t = np.hstack((y_data_t, j * np.ones(sublist_t.T.shape[0])))
+        x_data_t = np.vstack((x_data_t, sublist_t.transpose(2, 0, 1)))
+        y_data_t = np.hstack((y_data_t, j * np.ones(sublist_t.transpose(2, 0, 1).shape[0])))
         
     j=j+1
 
-# scale
-scaler = StandardScaler()
-scaler.fit(x_data_s)
-x_data_s = scaler.transform(x_data_s)
-x_data_t = scaler.transform(x_data_t)
+# channel based scale
+scalers = {}
+for i in range(x_data_s.shape[2]):
+    scalers[i] = StandardScaler()
+    x_data_s[:, :, i] = scalers[i].fit_transform(x_data_s[:, :, i])
+
+for i in range(x_data_t.shape[2]):
+    x_data_t[:, :, i] = scalers[i].transform(x_data_t[:, :, i])
 
 # source
 X_train, X_test, y_train, y_test = train_test_split(x_data_s, y_data_s,
@@ -168,9 +176,14 @@ class DANNBuilder(object):
 
     def _build_feature_extractor(self, model_input):
         '''Build segment of net for feature extraction.'''
-        net = Dense(256, activation='relu')(model_input)
-        net = Dense(256, activation='relu')(net)
+        net = Conv1D(nb_filters, nb_conv,
+                     padding='valid',
+                     activation='relu')(model_input)
+        net = Conv1D(nb_filters, nb_conv,
+                     activation='relu')(net)
+        net = MaxPooling1D(pool_size=nb_pool)(net)
         net = Dropout(0.5)(net)
+        net = Flatten()(net)
         self.domain_invariant_features = net
         return net
 
@@ -222,7 +235,7 @@ class DANNBuilder(object):
 
 
 # main_input = Input(shape=(3, img_rows, img_cols), name='main_input')
-main_input = Input(shape=(nb_features, ), name='main_input')
+main_input = Input(shape=(nb_features, nb_channel), name='main_input')
 
 builder = DANNBuilder()
 src_model = builder.build_source_model(main_input, plot_model_cond=True)
@@ -294,14 +307,13 @@ for i in range(nb_epoch_trg):
     print('Epoch ', i, 'Train Accuracy: ', acc_train, 'Test Accuracy: ', acc_test)
 
 print('Evaluating source samples on source-only model')
-print('Accuracy:', src_model.evaluate(X_train, y_train, verbose=0)[1])
 print('Accuracy:', src_model.evaluate(X_test, y_test, verbose=0)[1])
 print('Evaluating target samples on source-only model')
 print('Accuracy:', src_model.evaluate(XT_test, yT_test, verbose=0)[1])
 
 print('Evaluating source samples on DANN model')
-print('Accuracy:', evaluate_dann(X_train, y_train, batch_size))
-print('Accuracy:', evaluate_dann(X_test, y_test, batch_size))
+acc = evaluate_dann(X_test, y_test, batch_size)
+print('Accuracy:', acc)
 print('Evaluating target samples on DANN model')
 acc = evaluate_dann(XT_test, yT_test, batch_size)
 print('Accuracy:', acc)
